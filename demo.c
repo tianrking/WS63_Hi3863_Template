@@ -1,134 +1,112 @@
-
-#define CONFIG_UART_BUS_ID 1
-#define CONFIG_UART_RXD_PIN 16
-#define CONFIG_UART_TXD_PIN 15
-
-#include "pinctrl.h"
-#include "soc_osal.h"
+#include "lwip/netifapi.h"
+#include "wifi_hotspot.h"
+#include "wifi_hotspot_config.h"
+#include "td_base.h"
+#include "td_type.h"
+#include "stdlib.h"
 #include "uart.h"
-#include "watchdog.h"
-#include "osal_debug.h"
 #include "cmsis_os2.h"
 #include "app_init.h"
+#include "soc_osal.h"
 
-#define UART_BAUDRATE 115200
-#define UART_DATA_BITS 3
-#define UART_STOP_BITS 1
-#define UART_PARITY_BIT 0
-#define UART_TRANSFER_SIZE 512
-#define CONFIG_UART_INT_WAIT_MS 5
+#define WIFI_IFNAME_MAX_SIZE            16
+#define WIFI_MAX_KEY_LEN                65
+#define WIFI_MAX_SSID_LEN               33
+#define WIFI_SOFTAP_SAMPLE_LOG          "[WIFI_SOFTAP_SAMPLE]"
 
-#define UART_TASK_STACK_SIZE 0x1000
-#define UART_TASK_DURATION_MS 1000
-#define UART_TASK_PRIO (osPriority_t)(17)
-
-static uint8_t g_app_uart_rx_buff[UART_TRANSFER_SIZE] = {0};
-
-static uint8_t g_app_uart_int_rx_flag = 0;
-
-static uart_buffer_config_t g_app_uart_buffer_config = {
-    .rx_buffer = g_app_uart_rx_buff,
-    .rx_buffer_size = UART_TRANSFER_SIZE};
-
-static void app_uart_init_pin(void)
+#define WIFI_TASK_PRIO                  (osPriority_t)(13)
+#define WIFI_TASK_DURATION_MS           2000
+#define WIFI_TASK_STACK_SIZE            0x1000
+/*****************************************************************************
+  SoftAP sample用例
+*****************************************************************************/
+td_s32 example_softap_function(td_void)
 {
-    uapi_pin_set_mode(CONFIG_UART_TXD_PIN, PIN_MODE_1);
-    uapi_pin_set_mode(CONFIG_UART_RXD_PIN, PIN_MODE_1);
+    /* SoftAp接口的信息 */
+    td_char ssid[WIFI_MAX_SSID_LEN] = "H3863";
+    td_char pre_shared_key[WIFI_MAX_KEY_LEN] = "22222222";
+    softap_config_stru hapd_conf = {0};
+    softap_config_advance_stru config = {0};
+    td_char ifname[WIFI_IFNAME_MAX_SIZE + 1] = "ap0"; /* 创建的SoftAp接口名 */
+    struct netif *netif_p = TD_NULL;
+    ip4_addr_t   st_gw;
+    ip4_addr_t   st_ipaddr;
+    ip4_addr_t   st_netmask;
+    IP4_ADDR(&st_ipaddr, 192, 168, 43, 1); /* IP地址设置：192.168.43.1 */
+    IP4_ADDR(&st_netmask, 255, 255, 255, 0); /* 子网掩码设置：255.255.255.0 */
+    IP4_ADDR(&st_gw, 192, 168, 43, 2); /* 网关地址设置：192.168.43.2 */
+
+    /* 配置SoftAp基本参数 */
+    (td_void)memcpy_s(hapd_conf.ssid, sizeof(hapd_conf.ssid), ssid, sizeof(ssid));
+    (td_void)memcpy_s(hapd_conf.pre_shared_key, WIFI_MAX_KEY_LEN, pre_shared_key, WIFI_MAX_KEY_LEN);
+    hapd_conf.security_type = 3; /* 3: 加密方式设置为WPA_WPA2_PSK */
+    hapd_conf.channel_num = 13; /* 13：工作信道设置为13信道 */
+    hapd_conf.wifi_psk_type = 0;
+
+    /* 配置SoftAp网络参数 */
+    config.beacon_interval = 100; /* 100：Beacon周期设置为100ms */
+    config.dtim_period = 2; /* 2：DTIM周期设置为2 */
+    config.gi = 0; /* 0：short GI默认关闭 */
+    config.group_rekey = 86400; /* 86400：组播秘钥更新时间设置为1天 */
+    config.protocol_mode = 4; /* 4：协议类型设置为802.11b + 802.11g + 802.11n + 802.11ax */
+    config.hidden_ssid_flag = 1; /* 1：不隐藏SSID */
+    if (wifi_set_softap_config_advance(&config) != 0) {
+        return -1;
+    }
+    /* 启动SoftAp接口 */
+    if (wifi_softap_enable(&hapd_conf) != 0) {
+        return -1;
+    }
+    /* 配置DHCP服务器 */
+    netif_p = netif_find(ifname);
+    if (netif_p == TD_NULL) {
+        (td_void)wifi_softap_disable();
+        return -1;
+    }
+    if (netifapi_netif_set_addr(netif_p, &st_ipaddr, &st_netmask, &st_gw) != 0) {
+        (td_void)wifi_softap_disable();
+        return -1;
+    }
+    if (netifapi_dhcps_start(netif_p, NULL, 0) != 0) {
+        (td_void)wifi_softap_disable();
+        return -1;
+    }
+    PRINT("%s::SoftAp start success.\r\n", WIFI_SOFTAP_SAMPLE_LOG);
+    return 0;
 }
 
-static void app_uart_init_config(void)
+int softap_sample_init(void *param)
 {
-    uart_attr_t attr = {
-        .baud_rate = UART_BAUDRATE,
-        .data_bits = UART_DATA_BITS,
-        .stop_bits = UART_STOP_BITS,
-        .parity = UART_PARITY_BIT};
+    param = param;
 
-    uart_pin_config_t pin_config = {
-        .tx_pin = CONFIG_UART_TXD_PIN,
-        .rx_pin = CONFIG_UART_RXD_PIN,
-        .cts_pin = PIN_NONE,
-        .rts_pin = PIN_NONE};
-    uapi_uart_deinit(CONFIG_UART_BUS_ID);
-    uapi_uart_init(CONFIG_UART_BUS_ID, &pin_config, &attr, NULL, &g_app_uart_buffer_config);
+    /* 等待wifi初始化完成 */
+    while (wifi_is_wifi_inited() == 0) {
+        (void)osDelay(10); /* 1: 等待100ms后判断状态 */
+    }
+    PRINT("%s::wifi init succ.\r\n", WIFI_SOFTAP_SAMPLE_LOG);
+
+    if (example_softap_function() != 0) {
+        PRINT("%s::example_softap_function fail.\r\n", WIFI_SOFTAP_SAMPLE_LOG);
+        return -1;
+    }
+    return 0;
 }
 
-static void app_uart_read_int_handler(const void *buffer, uint16_t length, bool error)
+static void softap_sample_entry(void)
 {
-    unused(error);
-    if (buffer == NULL || length == 0)
-    {
-        osal_printk("uart%d int mode transfer illegal data!\r\n", CONFIG_UART_BUS_ID);
-        return;
+    osThreadAttr_t attr;
+    attr.name       = "softap_sample_task";
+    attr.attr_bits  = 0U;
+    attr.cb_mem     = NULL;
+    attr.cb_size    = 0U;
+    attr.stack_mem  = NULL;
+    attr.stack_size = WIFI_TASK_STACK_SIZE;
+    attr.priority   = WIFI_TASK_PRIO;
+    if (osThreadNew((osThreadFunc_t)softap_sample_init, NULL, &attr) == NULL) {
+        PRINT("%s::Create softap_sample_task fail.\r\n", WIFI_SOFTAP_SAMPLE_LOG);
     }
-
-    uint8_t *buff = (uint8_t *)buffer;
-    if (memcpy_s(g_app_uart_rx_buff, length, buff, length) != EOK)
-    {
-        osal_printk("uart%d int mode data copy fail!\r\n", CONFIG_UART_BUS_ID);
-        return;
-    }
-    g_app_uart_int_rx_flag = 1;
+    PRINT("%s::Create softap_sample_task succ.\r\n", WIFI_SOFTAP_SAMPLE_LOG);
 }
 
-static void app_uart_write_int_handler(const void *buffer, uint32_t length, const void *params)
-{
-    unused(params);
-    uint8_t *buff = (void *)buffer;
-    for (uint32_t i = 0; i < length; i++)
-    {
-        osal_printk("uart%d write data[%d] = %d\r\n", CONFIG_UART_BUS_ID, i, buff[i]);
-    }
-}
-
-static void *uart_task(const char *arg)
-{
-    unused(arg);
-    /* UART pinmux. */
-    app_uart_init_pin();
-
-    /* UART init config. */
-    app_uart_init_config();
-
-    osal_printk("uart%d int mode register receive callback start!\r\n", CONFIG_UART_BUS_ID);
-    if (uapi_uart_register_rx_callback(CONFIG_UART_BUS_ID, UART_RX_CONDITION_FULL_OR_IDLE,
-                                       1, app_uart_read_int_handler) == ERRCODE_SUCC)
-    {
-        osal_printk("uart%d int mode register receive callback succ!\r\n", CONFIG_UART_BUS_ID);
-    }
-
-    while (1)
-    {
-        osal_msleep(UART_TASK_DURATION_MS);
-
-        while (g_app_uart_int_rx_flag != 1)
-        {
-            osal_msleep(CONFIG_UART_INT_WAIT_MS);
-        }
-        g_app_uart_int_rx_flag = 0;
-        osal_printk("uart%d int mode send back!\r\n", CONFIG_UART_BUS_ID);
-        if (uapi_uart_write_int(CONFIG_UART_BUS_ID, g_app_uart_rx_buff, UART_TRANSFER_SIZE, 0,
-                                app_uart_write_int_handler) == ERRCODE_SUCC)
-        {
-            osal_printk("uart%d int mode send back succ!\r\n", CONFIG_UART_BUS_ID);
-        }
-    }
-
-    return NULL;
-}
-
-static void uart_entry(void)
-{
-    osal_task *task_handle = NULL;
-    osal_kthread_lock();
-    task_handle = osal_kthread_create((osal_kthread_handler)uart_task, 0, "UartTask", UART_TASK_STACK_SIZE);
-    if (task_handle != NULL)
-    {
-        osal_kthread_set_priority(task_handle, UART_TASK_PRIO);
-        osal_kfree(task_handle);
-    }
-    osal_kthread_unlock();
-}
-
-/* Run the uart_entry. */
-app_run(uart_entry);
+/* Run the sta_sample_task. */
+app_run(softap_sample_entry);
