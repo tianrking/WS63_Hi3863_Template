@@ -1,24 +1,18 @@
-if(DEFINED CONFIG_SAMPLE_SUPPORT_BLE_UART_SERVER)
 set(SOURCES_LIST
-    ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart_server/ble_uart_server.c
-    ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart_server/ble_uart_server_adv.c
-#    ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/sle_uart_server/sle_uart_server_adv.c
+    ${CMAKE_CURRENT_SOURCE_DIR}/sle_uart_server/sle_uart_server.c
     ${CMAKE_CURRENT_SOURCE_DIR}/demo.c
 )
-set(PUBLIC_HEADER_LIST ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart_server ${CMAKE_CURRENT_SOURCE_DIR})
+set(PUBLIC_HEADER_LIST ${CMAKE_CURRENT_SOURCE_DIR}/sle_uart_server)
 
 
-##elseif(DEFINED CONFIG_SAMPLE_SUPPORT_BLE_UART_CLIENT)
+#elseif(DEFINED CONFIG_SAMPLE_SUPPORT_SLE_UART_CLIENT)
 #set(SOURCES_LIST
-#    ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart_client/ble_uart_client.c
-#    ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart_client/ble_uart_client_scan.c
-#    ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart.c
+#    ${CMAKE_CURRENT_SOURCE_DIR}/sle_uart_client/sle_uart_client.c
 #    ${CMAKE_CURRENT_SOURCE_DIR}/demo.c
-##)
-##set(PUBLIC_HEADER_LIST ${CMAKE_CURRENT_SOURCE_DIR}/ble_uart_client ${CMAKE_CURRENT_SOURCE_DIR})
-##endif()
+#)
+#set(PUBLIC_HEADER_LIST ${CMAKE_CURRENT_SOURCE_DIR}/sle_uart_client)
+#endif()
 
-
-
-set(SOURCES "${SOURCES_LIST}" PARENT_SCOPE)
-set(PUBLIC_HEADER "${PUBLIC_HEADER_LIST}" PARENT_SCOPE)
+set(SOURCES "${SOURCES}" "${SOURCES_LIST}" PARENT_SCOPE)
+set(PUBLIC_HEADER "${PUBLIC_HEADER}" "${PUBLIC_HEADER_LIST}" PARENT_SCOPE)
